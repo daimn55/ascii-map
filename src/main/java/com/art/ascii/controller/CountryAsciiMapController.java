@@ -18,9 +18,9 @@ import java.util.stream.Collectors;
  * and serves the React Single Page Application (SPA).
  */
 @Controller
-public class AsciiMapController {
+public class CountryAsciiMapController {
 
-    private static final Logger logger = LoggerFactory.getLogger(AsciiMapController.class);
+    private static final Logger logger = LoggerFactory.getLogger(CountryAsciiMapController.class);
     
     // Constants for input validation
     private final int minWidth;
@@ -50,7 +50,7 @@ public class AsciiMapController {
      * @param defaultHeight Default height for ASCII maps
      */
     @Autowired
-    public AsciiMapController(
+    public CountryAsciiMapController(
             AsciiMapService asciiMapService,
             @Value("${ascii.map.min-width:10}") int minWidth,
             @Value("${ascii.map.max-width:200}") int maxWidth,

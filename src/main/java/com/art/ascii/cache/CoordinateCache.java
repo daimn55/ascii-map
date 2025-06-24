@@ -68,7 +68,7 @@ public class CoordinateCache {
         // Always load country codes
         loadCountryCodes();
         
-        // Conditionally load all coordinates
+        // Conditionally load all coordinates based on configuration
         if (preloadCoordinates) {
             logger.info("Preloading coordinates for all countries");
             for (String countryCode : availableCountries) {
@@ -172,10 +172,12 @@ public class CoordinateCache {
                 return Collections.emptyList();
             }
             
-            // Determine optimal thread count - don't use more threads than necessary
+            // Configure parallelism level for common ForkJoinPool
+            // This only sets it for the current execution and doesn't affect other operations
             int processors = Math.min(4, Runtime.getRuntime().availableProcessors());
-            ExecutorService executor = Executors.newFixedThreadPool(processors);
-            List<Future<List<double[]>>> futures = new ArrayList<>();
+            System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", String.valueOf(processors));
+            
+            List<CompletableFuture<List<double[]>>> futures = new ArrayList<>();
             
             try {
                 // Create CSV parser with semicolon as separator
@@ -192,35 +194,57 @@ public class CoordinateCache {
                         batch.add(line);
                         
                         if (batch.size() >= batchSize) {
-                            submitBatch(batch, countryCode, executor, futures);
+                            // Create a copy of the batch to avoid modification issues
+                            List<String[]> batchToProcess = new ArrayList<>(batch);
+                            batch.clear();
+                            
+                            // Submit batch as a CompletableFuture using default ForkJoinPool
+                            CompletableFuture<List<double[]>> future = CompletableFuture
+                                .supplyAsync(() -> processBatch(batchToProcess, countryCode))
+                                .exceptionally(ex -> {
+                                    logger.error("Error processing batch: {}", ex.getMessage());
+                                    return Collections.emptyList();
+                                });
+                            futures.add(future);
                         }
                     }
                     
                     // Process the final batch if it's not empty
                     if (!batch.isEmpty()) {
-                        submitBatch(batch, countryCode, executor, futures);
+                        // Create a copy of the batch to avoid modification issues
+                        List<String[]> batchToProcess = new ArrayList<>(batch);
+                        batch.clear();
+                        
+                        // Submit final batch as a CompletableFuture
+                        CompletableFuture<List<double[]>> future = CompletableFuture
+                            .supplyAsync(() -> processBatch(batchToProcess, countryCode))
+                            .exceptionally(ex -> {
+                                logger.error("Error processing batch: {}", ex.getMessage());
+                                return Collections.emptyList();
+                            });
+                        futures.add(future);
                     }
                     
-                    // Collect results from all threads
-                    for (Future<List<double[]>> future : futures) {
-                        try {
-                            List<double[]> result = future.get();
-                            if (result != null) {
-                                coordinates.addAll(result);
-                            }
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            logger.error("Thread interrupted while processing batch", e);
-                            break;
-                        } catch (ExecutionException e) {
-                            logger.error("Error processing batch: {}", e.getCause().getMessage());
-                        }
+                    // Wait for all futures to complete and collect results
+                    CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+                        futures.toArray(new CompletableFuture[0])
+                    );
+                    
+                    try {
+                        // Wait for all tasks to complete
+                        allFutures.join();
+                        
+                        // Collect results from all completed futures
+                        futures.forEach(future -> {
+                            List<double[]> result = future.join();
+                            coordinates.addAll(result);
+                        });
+                    } catch (Exception e) {
+                        logger.error("Error waiting for batch processing: {}", e.getMessage());
                     }
                 }
             } catch (IOException | CsvValidationException e) {
                 logger.error("Error reading CSV file: {}", e.getMessage());
-            } finally {
-                shutdownExecutor(executor);
             }
         } catch (IOException e) {
             logger.error("Error opening input stream for CSV file: {}", e.getMessage());
@@ -228,17 +252,6 @@ public class CoordinateCache {
         
         logger.info("Loaded {} coordinates for country code: {}", coordinates.size(), countryCode);
         return coordinates;
-    }
-    
-    /**
-     * Submits a batch of CSV lines for parallel processing.
-     */
-    private void submitBatch(List<String[]> batch, String countryCode, 
-                            ExecutorService executor, List<Future<List<double[]>>> futures) {
-        List<String[]> batchToProcess = new ArrayList<>(batch);
-        batch.clear();
-        
-        futures.add(executor.submit(() -> processBatch(batchToProcess, countryCode)));
     }
     
     /**
@@ -282,26 +295,5 @@ public class CoordinateCache {
     private boolean isValidCoordinate(double lat, double lon) {
         return lat >= MIN_LATITUDE && lat <= MAX_LATITUDE && 
                lon >= MIN_LONGITUDE && lon <= MAX_LONGITUDE;
-    }
-    
-    /**
-     * Safely shuts down the executor service.
-     */
-    private void shutdownExecutor(ExecutorService executor) {
-        executor.shutdown();
-        try {
-            // Wait a while for existing tasks to terminate
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                executor.shutdownNow(); // Cancel currently executing tasks
-                // Wait a while for tasks to respond to being cancelled
-                if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    logger.warn("Executor did not terminate");
-                }
-            }
-        } catch (InterruptedException ie) {
-            // Re-cancel if current thread also interrupted
-            executor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 }
