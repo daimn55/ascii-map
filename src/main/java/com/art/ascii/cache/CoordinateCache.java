@@ -1,5 +1,6 @@
 package com.art.ascii.cache;
 
+import com.art.ascii.loader.CoordinateDataLoader;
 import com.opencsv.CSVParserBuilder;
 import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
@@ -19,11 +20,12 @@ import java.util.concurrent.*;
 import java.util.stream.Collectors;
 
 /**
- * Service that caches country coordinates during application startup
+ * Service that caches country coordinates and implements CoordinateDataLoader.
+ * This service loads and caches coordinates from CSV files during application startup
  * to avoid repeated CSV file reading and parsing for each API request.
  */
 @Service
-public class CoordinateCache {
+public class CoordinateCache implements CoordinateDataLoader {
     private static final Logger logger = LoggerFactory.getLogger(CoordinateCache.class);
     
     // Cache structures
@@ -87,7 +89,8 @@ public class CoordinateCache {
      * 
      * @return Unmodifiable set of country codes
      */
-    public Set<String> getAvailableCountries() {
+    @Override
+    public Set<String> getAvailableCountryCodes() {
         return Collections.unmodifiableSet(availableCountries);
     }
     
@@ -97,6 +100,7 @@ public class CoordinateCache {
      * @param countryCode The country code to check
      * @return true if the country exists in the data, false otherwise
      */
+    @Override
     public boolean hasCountry(String countryCode) {
         if (countryCode == null) {
             return false;
@@ -111,7 +115,8 @@ public class CoordinateCache {
      * @param countryCode The country code to get coordinates for
      * @return List of coordinate pairs [lat, lon]
      */
-    public List<double[]> getCoordinatesForCountry(String countryCode) {
+    @Override
+    public List<double[]> loadCoordinatesForCountry(String countryCode) {
         if (countryCode == null) {
             return Collections.emptyList();
         }
@@ -122,7 +127,7 @@ public class CoordinateCache {
         }
         
         // Load coordinates if they're not already in the cache
-        return coordinateCache.computeIfAbsent(normalizedCode, this::loadCoordinatesForCountry);
+        return coordinateCache.computeIfAbsent(normalizedCode, this::loadCoordinatesFromCsv);
     }
     
     /**
@@ -162,7 +167,7 @@ public class CoordinateCache {
      * @param countryCode The country code to load coordinates for
      * @return List of coordinate pairs [lat, lon]
      */
-    private List<double[]> loadCoordinatesForCountry(String countryCode) {
+    private List<double[]> loadCoordinatesFromCsv(String countryCode) {
         logger.debug("Loading coordinates for country: {}", countryCode);
         List<double[]> coordinates = Collections.synchronizedList(new ArrayList<>());
         
@@ -295,5 +300,23 @@ public class CoordinateCache {
     private boolean isValidCoordinate(double lat, double lon) {
         return lat >= MIN_LATITUDE && lat <= MAX_LATITUDE && 
                lon >= MIN_LONGITUDE && lon <= MAX_LONGITUDE;
+    }
+    
+    /**
+     * Gets the CSV file path used by this cache.
+     * 
+     * @return The path to the CSV file
+     */
+    public String getCsvFilePath() {
+        return csvFilePath;
+    }
+    
+    /**
+     * Gets the batch size used for processing coordinates.
+     * 
+     * @return The batch size
+     */
+    public int getBatchSize() {
+        return batchSize;
     }
 }

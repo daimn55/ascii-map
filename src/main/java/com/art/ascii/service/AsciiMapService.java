@@ -1,6 +1,9 @@
 package com.art.ascii.service;
 
 import com.art.ascii.cache.CoordinateCache;
+import com.art.ascii.loader.CoordinateDataLoader;
+import com.art.ascii.renderer.AsciiMapRenderer;
+import com.art.ascii.renderer.CountryAsciiMapRenderer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,22 +14,23 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Service for generating ASCII maps using cached coordinate data.
- * This service uses the CoordinateCache to avoid repeated CSV parsing.
+ * Service for generating ASCII maps using coordinate data.
+ * This service uses the CoordinateDataLoader to retrieve coordinate data
+ * and the AsciiMapRenderer to render ASCII maps.
  */
 @Service
 public class AsciiMapService {
     private static final Logger logger = LoggerFactory.getLogger(AsciiMapService.class);
 
-    private final CoordinateCache coordinateCache;
+    private final CoordinateDataLoader coordinateDataLoader;
     private final Map<String, String> countryNames;
     private final int defaultWidth;
     private final int defaultHeight;
     
     /**
-     * Creates a new AsciiMapService with the coordinate cache.
+     * Creates a new AsciiMapService with the coordinate data loader and default settings.
      * 
-     * @param coordinateCache Cache containing country coordinates
+     * @param coordinateCache Cache containing country coordinates and implementing CoordinateDataLoader
      * @param defaultWidth Default width for ASCII maps
      * @param defaultHeight Default height for ASCII maps
      */
@@ -36,7 +40,9 @@ public class AsciiMapService {
             @Value("${ascii.map.default-width:80}") int defaultWidth,
             @Value("${ascii.map.default-height:25}") int defaultHeight) {
         
-        this.coordinateCache = coordinateCache;
+        // CoordinateCache now implements CoordinateDataLoader
+        this.coordinateDataLoader = coordinateCache;
+        
         this.defaultWidth = defaultWidth;
         this.defaultHeight = defaultHeight;
         
@@ -51,7 +57,7 @@ public class AsciiMapService {
      * @return Map of country code to country name for all available countries
      */
     public Map<String, String> getAvailableCountries() {
-        Set<String> availableCodes = coordinateCache.getAvailableCountries();
+        Set<String> availableCodes = coordinateDataLoader.getAvailableCountryCodes();
         
         // Filter the full country list to only include countries with data
         Map<String, String> availableCountries = new HashMap<>();
@@ -78,7 +84,7 @@ public class AsciiMapService {
         }
         
         String normalizedCode = countryCode.trim().toUpperCase();
-        if (!coordinateCache.hasCountry(normalizedCode)) {
+        if (!coordinateDataLoader.hasCountry(normalizedCode)) {
             logger.warn("No data found for country code: {}", normalizedCode);
             return "No data found for country code: " + normalizedCode;
         }
@@ -90,97 +96,15 @@ public class AsciiMapService {
         logger.info("Rendering ASCII map for country: {}, dimensions: {}x{}", 
                 normalizedCode, mapWidth, mapHeight);
         
-        // Get coordinates from cache
-        List<double[]> coordinates = coordinateCache.getCoordinatesForCountry(normalizedCode);
+        // Get coordinates from data loader
+        List<double[]> coordinates = coordinateDataLoader.loadCoordinatesForCountry(normalizedCode);
         if (coordinates.isEmpty()) {
             return "No coordinate data available for " + normalizedCode;
         }
         
-        return renderAsciiMap(coordinates, mapWidth, mapHeight);
-    }
-    
-    /**
-     * Render ASCII map from coordinates.
-     * 
-     * @param coordinates List of coordinate pairs [lat, lon]
-     * @param width Map width
-     * @param height Map height
-     * @return ASCII representation of the coordinates
-     */
-    private String renderAsciiMap(List<double[]> coordinates, int width, int height) {
-        // Calculate boundaries
-        MapBoundary boundary = calculateBoundaries(coordinates);
-        
-        // Create and populate the grid
-        int[][] densityGrid = new int[height][width];
-        
-        for (double[] coord : coordinates) {
-            double lat = coord[0];
-            double lon = coord[1];
-            
-            // Map the coordinate to a grid cell
-            int x = (int) ((lon - boundary.minLon) / (boundary.maxLon - boundary.minLon) * (width - 1));
-            // Note: We invert the y-axis to match the typical map orientation
-            int y = height - 1 - (int) ((lat - boundary.minLat) / (boundary.maxLat - boundary.minLat) * (height - 1));
-            
-            // Ensure we stay within bounds (due to floating point precision issues)
-            if (x >= 0 && x < width && y >= 0 && y < height) {
-                // Create a "blob" effect by incrementing a small area around the point
-                int radius = 1; // Density radius
-                for (int cy = Math.max(0, y - radius); cy <= Math.min(height - 1, y + radius); cy++) {
-                    for (int cx = Math.max(0, x - radius); cx <= Math.min(width - 1, x + radius); cx++) {
-                        // Points closer to center get higher density values
-                        int distance = Math.abs(cx - x) + Math.abs(cy - y);
-                        int densityIncrement = radius + 1 - distance;
-                        if (densityIncrement > 0) {
-                            densityGrid[cy][cx] += densityIncrement;
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Convert density grid to ASCII
-        StringBuilder sb = new StringBuilder((height + 1) * width);
-        
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                if (densityGrid[y][x] > 0) {
-                    sb.append('*');
-                } else {
-                    sb.append(' ');
-                }
-            }
-            sb.append('\n');
-        }
-        
-        return sb.toString();
-    }
-    
-    /**
-     * Calculate map boundaries from coordinates.
-     * 
-     * @param coordinates List of coordinate pairs [lat, lon]
-     * @return MapBoundary object with min/max values
-     */
-    private MapBoundary calculateBoundaries(List<double[]> coordinates) {
-        double minLat = coordinates.stream().mapToDouble(coord -> coord[0]).min().orElse(0);
-        double maxLat = coordinates.stream().mapToDouble(coord -> coord[0]).max().orElse(0);
-        double minLon = coordinates.stream().mapToDouble(coord -> coord[1]).min().orElse(0);
-        double maxLon = coordinates.stream().mapToDouble(coord -> coord[1]).max().orElse(0);
-        
-        // Add a small buffer (1% of the range) to the boundaries for better visualization
-        double latRange = maxLat - minLat;
-        double lonRange = maxLon - minLon;
-        double latBuffer = latRange * 0.01;
-        double lonBuffer = lonRange * 0.01;
-        
-        return new MapBoundary(
-                minLat - latBuffer,
-                maxLat + latBuffer,
-                minLon - lonBuffer,
-                maxLon + lonBuffer
-        );
+        // Create renderer with appropriate dimensions and render the map
+        AsciiMapRenderer renderer = new CountryAsciiMapRenderer(mapWidth, mapHeight, coordinateDataLoader);
+        return renderer.renderMap(coordinates);
     }
     
     /**

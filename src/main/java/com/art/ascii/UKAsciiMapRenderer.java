@@ -1,5 +1,7 @@
 package com.art.ascii;
 
+import com.art.ascii.model.Coordinate;
+import com.art.ascii.model.CoordinateResult;
 import com.opencsv.CSVReader;
 import com.opencsv.exceptions.CsvValidationException;
 import java.io.IOException;
@@ -8,58 +10,30 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Renders UK postcode coordinates as ASCII art resembling a map of the UK.
- * This version includes dynamic boundary calculation based on the coordinates.
  */
 public class UKAsciiMapRenderer {
     private static final int GRID_HEIGHT = 60;
     private static final int GRID_WIDTH = 120;
     
-    // These are only used for validation, not for rendering boundaries
+    // These are only used for validation of lat long boundaries, not for rendering boundaries
     private static final double VALID_LAT_MIN = 49.0;
     private static final double VALID_LAT_MAX = 61.0;
     private static final double VALID_LON_MIN = -9.0;
     private static final double VALID_LON_MAX = 3.0;
+
+    private static final String UK_POSTCODES_CSV = "ukpostcodes.csv";
     
-    /**
-     * Represents a latitude and longitude coordinate.
-     */
-    public static class Coordinate {
-        double latitude;
-        double longitude;
+    // For better memory handling with large datasets
+    private static final int INITIAL_CAPACITY = 50000;
+    
+    // Character constants
+    private static final char MAP_CHAR = '*';
+    private static final char EMPTY_CHAR = ' ';
 
-        Coordinate(double latitude, double longitude) {
-            this.latitude = latitude;
-            this.longitude = longitude;
-        }
-    }
-
-    /**
-     * Result class containing coordinates and their boundaries.
-     */
-    private static class CoordinateResult {
-        List<Coordinate> coordinates;
-        double minLatitude;
-        double maxLatitude;
-        double minLongitude;
-        double maxLongitude;
-
-        CoordinateResult(List<Coordinate> coordinates,
-                        double minLatitude, double maxLatitude,
-                        double minLongitude, double maxLongitude) {
-            this.coordinates = coordinates;
-            this.minLatitude = minLatitude;
-            this.maxLatitude = maxLatitude;
-            this.minLongitude = minLongitude;
-            this.maxLongitude = maxLongitude;
-        }
-    }
-
-    /**
-     * Creates a SimpleAsciiMapRenderer.
-     */
     public UKAsciiMapRenderer() {
     }
 
@@ -68,7 +42,7 @@ public class UKAsciiMapRenderer {
      * @return CoordinateResult containing coordinates and their boundaries
      */
     private CoordinateResult loadCoordinatesWithBoundaries() {
-        List<Coordinate> coordinates = new ArrayList<>();
+        List<Coordinate> coordinates = new ArrayList<>(INITIAL_CAPACITY);
 
         // Initialize boundaries to extreme values
         double minLat = Double.MAX_VALUE;
@@ -76,35 +50,58 @@ public class UKAsciiMapRenderer {
         double minLon = Double.MAX_VALUE;
         double maxLon = -Double.MAX_VALUE;
 
-        try (InputStream is = getClass().getClassLoader().getResourceAsStream("ukpostcodes.csv");
-             CSVReader csvReader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
-            // Skip header
-            csvReader.readNext();
-            String[] line;
-            while ((line = csvReader.readNext()) != null) {
-                try {
-                    // Assume columns: id, postcode, latitude, longitude
-                    double lat = Double.parseDouble(line[2]);
-                    double lon = Double.parseDouble(line[3]);
+        // Track statistics for better diagnostics
+        AtomicInteger totalRows = new AtomicInteger(0);
+        AtomicInteger validRows = new AtomicInteger(0);
+        AtomicInteger skippedRows = new AtomicInteger(0);
 
-                    // Basic validation to filter out extreme outliers
-                    if (lat >= VALID_LAT_MIN && lat <= VALID_LAT_MAX &&
-                        lon >= VALID_LON_MIN && lon <= VALID_LON_MAX) {
+        try (InputStream is = getClass().getClassLoader().getResourceAsStream(UK_POSTCODES_CSV)) {
+            if (is == null) {
+                System.err.println("Error: Could not find resource " + UK_POSTCODES_CSV);
+                return createDefaultResult();
+            }
+            
+            try (CSVReader csvReader = new CSVReader(new InputStreamReader(is, StandardCharsets.UTF_8))) {
+                // Skip header
+                csvReader.readNext();
+                String[] line;
+                
+                while ((line = csvReader.readNext()) != null) {
+                    totalRows.incrementAndGet();
+                    
+                    try {
+                        // Assume columns: id, postcode, latitude, longitude
+                        if (line.length < 4) {
+                            skippedRows.incrementAndGet();
+                            continue;
+                        }
+                        
+                        double lat = Double.parseDouble(line[2]);
+                        double lon = Double.parseDouble(line[3]);
 
-                        coordinates.add(new Coordinate(lat, lon));
+                        // Basic validation to filter out extreme outliers
+                        if (lat >= VALID_LAT_MIN && lat <= VALID_LAT_MAX &&
+                            lon >= VALID_LON_MIN && lon <= VALID_LON_MAX) {
 
-                        // Update boundaries
-                        minLat = Math.min(minLat, lat);
-                        maxLat = Math.max(maxLat, lat);
-                        minLon = Math.min(minLon, lon);
-                        maxLon = Math.max(maxLon, lon);
+                            coordinates.add(new Coordinate(lat, lon));
+                            validRows.incrementAndGet();
+
+                            // Update boundaries
+                            minLat = Math.min(minLat, lat);
+                            maxLat = Math.max(maxLat, lat);
+                            minLon = Math.min(minLon, lon);
+                            maxLon = Math.max(maxLon, lon);
+                        } else {
+                            skippedRows.incrementAndGet();
+                        }
+                    } catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+                        skippedRows.incrementAndGet();
                     }
-                } catch (NumberFormatException | ArrayIndexOutOfBoundsException ignored) {
-                    // Skip invalid rows
                 }
             }
         } catch (IOException | CsvValidationException e) {
             System.err.println("Error loading CSV: " + e.getMessage());
+            return createDefaultResult();
         }
         
         // Add a small buffer to the boundaries (1% of range)
@@ -117,17 +114,28 @@ public class UKAsciiMapRenderer {
             minLon -= lonBuffer;
             maxLon += lonBuffer;
 
+            System.out.println("Processed " + totalRows.get() + " rows: " + 
+                               validRows.get() + " valid, " + 
+                               skippedRows.get() + " skipped");
             System.out.println("Calculated boundaries: lat [" + minLat + ", " + maxLat +
                     "], lon [" + minLon + ", " + maxLon + "]");
+            
+            return new CoordinateResult(coordinates, minLat, maxLat, minLon, maxLon);
         } else {
-            // Use defaults if no coordinates were found
-            minLat = 50.0;
-            maxLat = 59.0;
-            minLon = -8.0;
-            maxLon = 2.0;
+            System.err.println("No valid coordinates found in CSV.");
+            return createDefaultResult();
         }
-
-        return new CoordinateResult(coordinates, minLat, maxLat, minLon, maxLon);
+    }
+    
+    /**
+     * Creates a default result when no valid coordinates are found.
+     */
+    private CoordinateResult createDefaultResult() {
+        return new CoordinateResult(
+            new ArrayList<>(), 
+            50.0, 59.0, // default lat range
+            -8.0, 2.0   // default lon range
+        );
     }
     
     /**
@@ -136,42 +144,46 @@ public class UKAsciiMapRenderer {
      */
     private char[][] createAsciiGridWithDynamicBoundaries() {
         CoordinateResult result = loadCoordinatesWithBoundaries();
-        List<Coordinate> coordinates = result.coordinates;
+        List<Coordinate> coordinates = result.getCoordinates();
         
         if (coordinates.isEmpty()) {
+            System.err.println("No coordinates to render");
             return new char[0][0];
         }
         
         // Use the calculated boundaries
-        double latMin = result.minLatitude;
-        double latMax = result.maxLatitude;
-        double lonMin = result.minLongitude;
-        double lonMax = result.maxLongitude;
+        double latMin = result.getMinLatitude();
+        double latMax = result.getMaxLatitude();
+        double lonMin = result.getMinLongitude();
+        double lonMax = result.getMaxLongitude();
 
         // Initialize grid with spaces
         char[][] grid = new char[GRID_HEIGHT][GRID_WIDTH];
         for (int i = 0; i < GRID_HEIGHT; i++) {
             for (int j = 0; j < GRID_WIDTH; j++) {
-                grid[i][j] = ' ';
+                grid[i][j] = EMPTY_CHAR;
             }
         }
 
         // Map coordinates to grid using dynamic boundaries
         for (Coordinate coord : coordinates) {
             // Scale latitude to row (invert: higher latitude = lower row)
-            int row = (int) ((latMax - coord.latitude) / (latMax - latMin) * (GRID_HEIGHT - 1));
+            int row = (int) ((latMax - coord.getLatitude()) / (latMax - latMin) * (GRID_HEIGHT - 1));
             // Scale longitude to column
-            int col = (int) ((coord.longitude - lonMin) / (lonMax - lonMin) * (GRID_WIDTH - 1));
-            // Place '*' if within bounds
+            int col = (int) ((coord.getLongitude() - lonMin) / (lonMax - lonMin) * (GRID_WIDTH - 1));
+            
+            // Place character if within bounds
             if (row >= 0 && row < GRID_HEIGHT && col >= 0 && col < GRID_WIDTH) {
-                grid[row][col] = '*';
+                grid[row][col] = MAP_CHAR;
             }
         }
+        
         return grid;
     }
 
     /**
      * Converts the ASCII grid to a string.
+     * Optimized for performance with StringBuilder.
      * @param grid 2D char array to convert.
      * @return String representation of the ASCII art.
      */
@@ -180,9 +192,9 @@ public class UKAsciiMapRenderer {
             return "No grid to display.";
         }
 
-        StringBuilder sb = new StringBuilder();
+        StringBuilder sb = new StringBuilder(GRID_HEIGHT * (GRID_WIDTH + 1));
         for (char[] row : grid) {
-            sb.append(new String(row)).append('\n');
+            sb.append(row).append('\n');
         }
         return sb.toString();
     }
@@ -192,14 +204,26 @@ public class UKAsciiMapRenderer {
      * @return String containing the rendered ASCII map
      */
     public String renderMap() {
-        System.out.println("Rendering map with dynamic boundaries...");
+        System.out.println("Rendering UK ASCII map...");
+        long startTime = System.currentTimeMillis();
+        
         char[][] grid = createAsciiGridWithDynamicBoundaries();
+        
         if (grid.length == 0) {
             return "No valid coordinates to render.";
         }
-        return gridToString(grid);
+        
+        String result = gridToString(grid);
+        
+        long endTime = System.currentTimeMillis();
+        System.out.println("Rendering completed in " + (endTime - startTime) + "ms");
+        
+        return result;
     }
 
+    /**
+     * Main method to run the renderer.
+     */
     public static void main(String[] args) {
         String map = new UKAsciiMapRenderer().renderMap();
         System.out.println(map);
