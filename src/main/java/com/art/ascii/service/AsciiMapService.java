@@ -11,7 +11,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Service for generating ASCII maps using coordinate data.
@@ -368,22 +367,5 @@ public class AsciiMapService {
         
         // Return unmodifiable version to prevent accidental modification
         return Collections.unmodifiableMap(countries);
-    }
-    
-    /**
-     * Helper class to store map boundaries.
-     */
-    private static class MapBoundary {
-        final double minLat;
-        final double maxLat;
-        final double minLon;
-        final double maxLon;
-        
-        MapBoundary(double minLat, double maxLat, double minLon, double maxLon) {
-            this.minLat = minLat;
-            this.maxLat = maxLat;
-            this.minLon = minLon;
-            this.maxLon = maxLon;
-        }
     }
 }

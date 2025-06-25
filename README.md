@@ -42,10 +42,7 @@ Follow these steps to run the UKAsciiMapRenderer locally:
    mvn clean install
    ```
 
-4. Run the UKAsciiMapRenderer directly:
-   ```bash
-   java -cp target/ascii-map.jar com.art.ascii.UKAsciiMapRenderer
-   ```
+4. Run the UKAsciiMapRenderer directly using the `main` method
 
 **Requirements:**
 - Java 17 or higher
@@ -131,15 +128,6 @@ The application is hosted on AWS EC2 and can be accessed at:
 http://ec2-13-235-80-164.ap-south-1.compute.amazonaws.com:8443
 ```
 
-### User Interface Features
-
-- Country selection dropdown with popular countries list
-- Custom country code input option
-- Width and height customization
-- Console theme toggle
-- Download button for saving maps as text files
-- Responsive design for various screen sizes
-
 ### Key Assumptions
 
 - The CSV file (`geonames-postal-code.csv`) contains valid global coordinate data
@@ -147,19 +135,8 @@ http://ec2-13-235-80-164.ap-south-1.compute.amazonaws.com:8443
 - Coordinate data is available for the requested countries to render meaningful maps
 - Reasonable map dimensions (width 10-200, height 10-100)
 
-### Code Design and Best Practices
 
-- **Separation of Concerns**:
-  - Backend: Java Spring Boot for data processing and API endpoints
-  - Frontend: React components for UI rendering
-  - Data: Separate coordinate cache for efficient retrieval
-
-- **Responsive UI**:
-  - Responsive layout
-  - Progressive loading with loading indicators
-  - Error messaging
-
-### Optimization Techniques
+### Performance Considerations
 
 - **Coordinate Caching**: Pre-loads country codes and lazily loads coordinates(can be controlled via configuration)
 - **Batch Processing**: Processes large CSV files in batches
@@ -178,12 +155,21 @@ ascii-map/
 │   │   │   └── com/art/ascii/
 │   │   │       ├── AsciiMapApplication.java        # Main Spring Boot application
 │   │   │       ├── UKAsciiMapRenderer.java         # UK map renderer implementation
-│   │   │       ├── CountryAsciiMapRenderer.java    # Country map renderer implementation
+│   │   │       ├── CountryAsciiMapRenderer.java    # Country map renderer implementation (standalone)
 │   │   │       ├── cache/
-│   │   │       │   └── CoordinateCache.java        # Caching for coordinates
-│   │   │       └── controller/
-│   │   │           ├── UKAsciiMapController.java   # UK map API endpoint
-│   │   │           └── CountryAsciiMapController.java # Country map API endpoint
+│   │   │       │   └── CoordinateCache.java        # Caching for coordinates & data loading
+│   │   │       ├── controller/
+│   │   │       │   ├── UKAsciiMapController.java   # UK map API endpoint
+│   │   │       │   └── CountryAsciiMapController.java # Country map API endpoint
+│   │   │       ├── loader/
+│   │   │       │   └── CoordinateDataLoader.java   # Interface for loading coordinate data
+│   │   │       ├── model/
+│   │   │       │   └── MapBoundary.java            # Model for map geographic boundaries
+│   │   │       ├── renderer/
+│   │   │       │   ├── AsciiMapRenderer.java       # Interface for rendering ASCII maps
+│   │   │       │   └── CountryAsciiMapRenderer.java # Map renderer implementation
+│   │   │       └── service/
+│   │   │           └── AsciiMapService.java        # Service layer for ASCII map operations
 │   │   ├── resources/
 │   │   │   ├── application.properties              # Application configuration
 │   │   │   ├── ukpostcodes.csv.zip                 # UK coordinate data (zipped)
@@ -196,44 +182,6 @@ ascii-map/
 ├── images/                                         # Screenshots and example outputs
 ├── pom.xml                                         # Maven configuration
 ```
-
-### Dependencies
-
-- Java 17 or higher
-- Spring Boot 3.x
-- Maven 3.6 or higher
-- React (served as static content)
-- OpenCSV for CSV parsing
-- Bootstrap for UI styling
-
-### Configuration
-
-Key application properties (in `application.properties`):
-
-```properties
-# Server configuration
-server.port=8080
-
-# CSV file paths
-ascii.map.uk-csv-file-path=ukpostcodes.csv
-ascii.map.csv-file-path=geonames-postal-code.csv
-
-# Coordinate loading configuration
-ascii.map.preload-coordinates=false
-ascii.map.batch-size=1000
-
-# Default map dimensions
-ascii.map.default-width=120
-ascii.map.default-height=60
-```
-
-### Performance Considerations
-
-- For large countries with many coordinates, map generation may take a few seconds
-- The application uses a coordinate cache to improve subsequent rendering of the same country
-- Application can load the co-ordinates at boot time or lazily load them based on configuration
-- Batch size can be adjusted in configuration for optimal performance based on available memory
-
 ## Sample Outputs
 
 ### UKAsciiMapRenderer Console Output
@@ -249,19 +197,3 @@ The console output shows the geographical shape of the United Kingdom using aste
 The web-based CountryAsciiMapRenderer provides an interactive interface for generating ASCII maps of any country:
 
 ![Country Map Generator Web Interface](./images/Country_map_generator.png)
-
-The web interface features:
-
-1. **Input Form at the top:**
-   - Country selection dropdown with popular countries list
-   - Custom country code checkbox option
-   - Width and height input fields
-   - Console theme toggle switch
-   - Generate Map button
-
-2. **Map Display area:**
-   - Shows the country name and code as a heading
-   - Displays the map with green dots on a black background (when console theme is enabled)
-   - Provides "Generate Another" and "Download Map" buttons for additional actions
-
-The screenshot shows the United Kingdom (GB) rendered as an ASCII map with clear outlines of Scotland, England, Wales, and Northern Ireland. Each dot represents a postal code location, with the density of dots indicating population density.

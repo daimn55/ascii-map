@@ -1,6 +1,7 @@
 package com.art.ascii.renderer;
 
 import com.art.ascii.loader.CoordinateDataLoader;
+import com.art.ascii.model.MapBoundary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -19,9 +20,8 @@ public class CountryAsciiMapRenderer implements AsciiMapRenderer {
     // Configuration constants
     private static final int DEFAULT_WIDTH = 120;
     private static final int DEFAULT_HEIGHT = 60;
-    private static final String DEFAULT_CSV_PATH = "geonames-postal-code.csv";
     private static final int DENSITY_RADIUS = 1;
-    
+
     // Rendering characters
     private static final char POINT_CHAR = '*';
     private static final char EMPTY_CHAR = ' ';
@@ -32,23 +32,10 @@ public class CountryAsciiMapRenderer implements AsciiMapRenderer {
     private final CoordinateDataLoader dataLoader;
     
     /**
-     * Creates a new CountryAsciiMapRenderer with the specified dimensions and configuration.
-     *
-     * @param width The width of the ASCII map
-     * @param height The height of the ASCII map
-     * @param csvFilePath Path to the CSV file containing postal code data
-     */
-    public CountryAsciiMapRenderer(int width, int height, String csvFilePath) {
-        this.width = Math.max(10, width);  // Ensure minimum dimensions
-        this.height = Math.max(5, height);
-        this.dataLoader = null; // This constructor is deprecated and will be removed
-    }
-    
-    /**
      * Creates a new CountryAsciiMapRenderer with default settings.
      */
     public CountryAsciiMapRenderer() {
-        this(DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_CSV_PATH);
+        this(DEFAULT_WIDTH, DEFAULT_HEIGHT, null);
     }
     
     /**
@@ -124,23 +111,6 @@ public class CountryAsciiMapRenderer implements AsciiMapRenderer {
     }
     
     /**
-     * Container for map boundary information.
-     */
-    private static class MapBoundary {
-        private final double minLat;
-        private final double maxLat;
-        private final double minLon;
-        private final double maxLon;
-        
-        public MapBoundary(double minLat, double maxLat, double minLon, double maxLon) {
-            this.minLat = minLat;
-            this.maxLat = maxLat;
-            this.minLon = minLon;
-            this.maxLon = maxLon;
-        }
-    }
-    
-    /**
      * Creates a density grid from coordinates.
      * 
      * @param coordinates List of coordinate pairs [lat, lon]
@@ -155,8 +125,8 @@ public class CountryAsciiMapRenderer implements AsciiMapRenderer {
             double lon = coord[1];
             
             // Map the coordinate to a cell in the grid
-            int gridY = height - 1 - (int)((lat - boundary.minLat) / (boundary.maxLat - boundary.minLat) * (height - 1));
-            int gridX = (int)((lon - boundary.minLon) / (boundary.maxLon - boundary.minLon) * (width - 1));
+            int gridY = height - 1 - (int)((lat - boundary.getMinLat()) / (boundary.getMaxLat() - boundary.getMinLat()) * (height - 1));
+            int gridX = (int)((lon - boundary.getMinLon()) / (boundary.getMaxLon() - boundary.getMinLon()) * (width - 1));
             
             // Skip if outside grid (shouldn't happen with proper boundaries)
             if (gridY < 0 || gridY >= height || gridX < 0 || gridX >= width) {
