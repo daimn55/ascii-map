@@ -69,6 +69,7 @@ You can also access the UK ASCII Map through a REST API by running the Spring Bo
 ### Key Assumptions
 
 - The CSV file (`ukpostcodes.csv`) contains valid UK coordinate data and enough coordinates to render a meaningful map.
+- CSv file has been kept in the resources folder to simplify the execution.
 - CSV format: Contains at least latitude and longitude columns
 - Coordinates are within UK bounds (approximately latitude 49°N-61°N, longitude 8°W-2°E)
 - Console has sufficient width and height to display the map effectively
